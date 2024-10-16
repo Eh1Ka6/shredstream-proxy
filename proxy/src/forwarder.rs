@@ -8,6 +8,8 @@ use std::{
     thread::{sleep, spawn, Builder, JoinHandle},
     time::{Duration, SystemTime},
 };
+use blockstore::create_in_memory_blockstore; // Import your function
+use solana_ledger::blockstore::Blockstore;
 
 use arc_swap::ArcSwap;
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
@@ -48,6 +50,8 @@ pub fn start_forwarder_threads(
     debug_trace_shred: bool,
     shutdown_receiver: Receiver<()>,
     exit: Arc<AtomicBool>,
+    blockstore: Arc<Blockstore>,
+    temp_dir: Arc<TempDir>,  
 ) -> Vec<JoinHandle<()>> {
     let num_threads = num_threads
         .unwrap_or_else(|| usize::from(std::thread::available_parallelism().unwrap()).max(4));
@@ -92,6 +96,8 @@ pub fn start_forwarder_threads(
             let metrics = metrics.clone();
             let shutdown_receiver = shutdown_receiver.clone();
             let exit = exit.clone();
+            let blockstore = blockstore.clone(); // Clone blockstore
+            let temp_dir = temp_dir.clone();     // Clone temp_dir
 
             let send_thread = Builder::new()
                 .name(format!("ssPxyTx_{thread_id}"))
@@ -117,6 +123,7 @@ pub fn start_forwarder_threads(
                                    &local_dest_sockets,
                                    debug_trace_shred,
                                    &metrics,
+                                   &blockstore,
                                );
 
                                 // avoid unwrap to prevent log spam from panic handler in each thread
@@ -152,6 +159,7 @@ fn recv_from_channel_and_send_multiple_dest(
     local_dest_sockets: &Arc<Vec<SocketAddr>>,
     debug_trace_shred: bool,
     metrics: &Arc<ShredMetrics>,
+    blockstore: &Blockstore,
 ) -> Result<(), ShredstreamProxyError> {
     let packet_batch = maybe_packet_batch.map_err(ShredstreamProxyError::RecvError)?;
     let trace_shred_received_time = SystemTime::now();
@@ -189,6 +197,71 @@ fn recv_from_channel_and_send_multiple_dest(
                 });
         });
     });
+    // Extract shreds from the packet batch
+    let shreds: Vec<Shred> = packet_batch_vec[0]
+    .iter()
+    .filter_map(|packet| {
+        let data = packet.data(..)?;
+        Shred::new_from_serialized_shred(data.to_vec()).ok()
+    })
+    .collect();
+
+    // Insert shreds into the blockstore
+    blockstore.insert_shreds(shreds.clone(), None, false)?;
+
+    // Initialize a set to keep track of processed slots
+    let mut processed_slots = HashSet::new();
+
+    // Process shreds per slot
+    for shred in shreds {
+        let slot = shred.slot();
+        if processed_slots.contains(&slot) {
+            continue; // Skip if we've already processed this slot
+        }
+
+        // **Print the decoded shred here**
+        // Print basic information about the shred
+        println!("Shred Slot: {}", slot);
+        println!("Shred Index: {}", shred.index());
+        println!("Is Data Shred: {}", shred.is_data());
+        println!("Is Code Shred: {}", shred.is_code());
+
+        // If it's a data shred, print more details
+        if shred.is_data() {
+            println!("Shred is data shred.");
+            // You can access the payload of the shred
+            let payload = shred.payload();
+            println!("Shred Payload Length: {}", payload.len());
+
+            // Optionally, print the payload data (be cautious with large data)
+            println!("Shred Payload Data: {:?}", &payload[..]);
+        } else if shred.is_code() {
+            println!("Shred is code shred.");
+            // Handle code shred if needed
+        }
+
+        println!("---"); // Separator between shreds
+        // Check if the slot is full
+        if let Ok(Some(slot_meta)) = blockstore.meta(slot) {
+            if slot_meta.is_full() {
+                // Get all entries for the slot
+                if let Ok(entries) = blockstore.get_slot_entries(slot, 0, None) {
+                    println!("Deserialized entries for slot {}: {:?}", slot, entries);
+
+                    // Serialize the entries as a string and write to file
+                    let mut file = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("deshred_entries.txt")?;
+                    let entries_string = format!("{:?}", entries);
+                    file.write_all(entries_string.as_bytes())?;
+
+                    // Mark slot as processed
+                    processed_slots.insert(slot);
+                }
+            }
+        }
+    }
 
     local_dest_sockets.iter().for_each(|outgoing_socketaddr| {
         let packets_with_dest = packet_batch_vec[0].iter().filter_map(|pkt| {
@@ -490,6 +563,10 @@ mod tests {
 
     #[test]
     fn test_2shreds_3destinations() {
+        let (blockstore_instance, temp_dir_instance) = create_in_memory_blockstore();
+        let blockstore = Arc::new(blockstore_instance);
+        let _temp_dir = temp_dir_instance; // Keep TempDir in scope
+    
         let packet_batch = PacketBatch::new(vec![
             Packet::new(
                 [1; PACKET_DATA_SIZE],
@@ -553,6 +630,7 @@ mod tests {
             &Arc::new(dest_socketaddrs),
             false,
             &Arc::new(ShredMetrics::new()),
+            &blockstore,
         )
         .unwrap();
 

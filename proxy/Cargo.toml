@@ -34,3 +34,4 @@ solana-streamer = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
+solana-ledger = { workspace = true }

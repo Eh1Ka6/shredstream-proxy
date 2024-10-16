@@ -258,6 +258,11 @@ fn main() -> Result<(), ShredstreamProxyError> {
     let metrics = Arc::new(ShredMetrics::new());
     let use_discovery_service =
         args.endpoint_discovery_url.is_some() && args.discovered_endpoints_port.is_some();
+
+    let (blockstore_instance, temp_dir_instance) = create_in_memory_blockstore();
+    let blockstore = Arc::new(blockstore_instance);
+    let temp_dir = Arc::new(temp_dir_instance); // Keep TempDir alive
+
     let forwarder_hdls = forwarder::start_forwarder_threads(
         unioned_dest_sockets.clone(),
         args.src_bind_addr,
@@ -269,6 +274,8 @@ fn main() -> Result<(), ShredstreamProxyError> {
         args.debug_trace_shred,
         shutdown_receiver.clone(),
         exit.clone(),
+        blockstore.clone(), // Pass blockstore
+        temp_dir.clone(),   // Pass temp_dir
     );
     thread_handles.extend(forwarder_hdls);
 
