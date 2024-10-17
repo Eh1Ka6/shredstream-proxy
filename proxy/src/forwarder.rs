@@ -218,7 +218,7 @@ fn recv_from_channel_and_send_multiple_dest(
             continue; // Skip if we've already processed this slot
         }
 
-        // **Print the decoded shred here**
+       /* // **Print the decoded shred here**
         // Print basic information about the shred
         println!("Shred Slot: {}", slot);
         println!("Shred Index: {}", shred.index());
@@ -239,7 +239,7 @@ fn recv_from_channel_and_send_multiple_dest(
             // Handle code shred if needed
         }
 
-        println!("---"); // Separator between shreds
+        println!("---"); // Separator between shreds*/
         // Check if the slot is full
         if let Ok(Some(slot_meta)) = blockstore.meta(slot) {
             if slot_meta.is_full() {
