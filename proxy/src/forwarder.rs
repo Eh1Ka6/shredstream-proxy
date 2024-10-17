@@ -1,16 +1,14 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
-    panic,
-    sync::{
+    collections::HashSet, net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket}, panic, sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, RwLock,
-    },
-    thread::{sleep, spawn, Builder, JoinHandle},
-    time::{Duration, SystemTime},
+    }, thread::{sleep, spawn, Builder, JoinHandle}, time::{Duration, SystemTime}
 };
-use blockstore::create_in_memory_blockstore; // Import your function
-use solana_ledger::blockstore::Blockstore;
+use std::fs::OpenOptions;
+use std::io::Write;
 
+use solana_ledger::blockstore::Blockstore;
+use solana_ledger::shred::Shred;
 use arc_swap::ArcSwap;
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use dashmap::DashMap;
@@ -30,7 +28,8 @@ use solana_streamer::{
     streamer::StreamerReceiveStats,
 };
 
-use crate::{resolve_hostname_port, ShredstreamProxyError};
+use tempfile::TempDir;
+use crate::{resolve_hostname_port, ShredstreamProxyError, inmemoryblockstore::create_in_memory_blockstore};
 
 // values copied from https://github.com/solana-labs/solana/blob/33bde55bbdde13003acf45bb6afe6db4ab599ae4/core/src/sigverify_shreds.rs#L20
 pub const DEDUPER_FALSE_POSITIVE_RATE: f64 = 0.001;
@@ -207,7 +206,7 @@ fn recv_from_channel_and_send_multiple_dest(
     .collect();
 
     // Insert shreds into the blockstore
-    blockstore.insert_shreds(shreds.clone(), None, false)?;
+    blockstore.insert_shreds(shreds.clone(), None, false).unwrap();
 
     // Initialize a set to keep track of processed slots
     let mut processed_slots = HashSet::new();
@@ -245,7 +244,7 @@ fn recv_from_channel_and_send_multiple_dest(
         if let Ok(Some(slot_meta)) = blockstore.meta(slot) {
             if slot_meta.is_full() {
                 // Get all entries for the slot
-                if let Ok(entries) = blockstore.get_slot_entries(slot, 0, None) {
+                if let Ok(entries) = blockstore.get_slot_entries(slot, 0) {
                     println!("Deserialized entries for slot {}: {:?}", slot, entries);
 
                     // Serialize the entries as a string and write to file
@@ -551,7 +550,7 @@ mod tests {
     };
     use solana_sdk::packet::{PacketFlags, PACKET_DATA_SIZE};
 
-    use crate::forwarder::{recv_from_channel_and_send_multiple_dest, ShredMetrics};
+    use crate::{forwarder::{recv_from_channel_and_send_multiple_dest, ShredMetrics}, inmemoryblockstore::create_in_memory_blockstore};
 
     fn listen_and_collect(listen_socket: UdpSocket, received_packets: Arc<Mutex<Vec<Vec<u8>>>>) {
         let mut buf = [0u8; PACKET_DATA_SIZE];

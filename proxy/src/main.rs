@@ -13,7 +13,7 @@ use std::{
     thread::{sleep, JoinHandle},
     time::Duration,
 };
-
+use tempfile::TempDir;
 use arc_swap::ArcSwap;
 use clap::{arg, Parser};
 use crossbeam_channel::{Receiver, RecvError, Sender};
@@ -27,11 +27,12 @@ use thiserror::Error;
 use tokio::runtime::Runtime;
 use tonic::Status;
 
-use crate::{forwarder::ShredMetrics, token_authenticator::BlockEngineConnectionError};
+use crate::{forwarder::ShredMetrics, token_authenticator::BlockEngineConnectionError, inmemoryblockstore::create_in_memory_blockstore};
 
 mod forwarder;
 mod heartbeat;
 mod token_authenticator;
+mod inmemoryblockstore;
 
 #[derive(Clone, Debug, Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -260,8 +261,8 @@ fn main() -> Result<(), ShredstreamProxyError> {
         args.endpoint_discovery_url.is_some() && args.discovered_endpoints_port.is_some();
 
     let (blockstore_instance, temp_dir_instance) = create_in_memory_blockstore();
-    let blockstore = Arc::new(blockstore_instance);
-    let temp_dir = Arc::new(temp_dir_instance); // Keep TempDir alive
+    let blockstore: Arc<solana_ledger::blockstore::Blockstore> = Arc::new(blockstore_instance);
+    let temp_dir: Arc<TempDir> = Arc::new(temp_dir_instance); // Keep TempDir alive
 
     let forwarder_hdls = forwarder::start_forwarder_threads(
         unioned_dest_sockets.clone(),

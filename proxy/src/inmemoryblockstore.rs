@@ -1,4 +1,4 @@
-use solana_ledger::blockstore::Blockstore;
+use solana_ledger::{blockstore::Blockstore,  blockstore_options::BlockstoreOptions};
 use rocksdb::Options;
 use tempfile::TempDir;
 
@@ -8,13 +8,11 @@ pub fn create_in_memory_blockstore() -> (Blockstore, TempDir) {
     let db_path = temp_dir.path();
 
     // Set up RocksDB options for in-memory operation
-    let mut db_options = Options::default();
-    db_options.create_if_missing(true);
-    db_options.set_paranoid_checks(false);
-    db_options.set_max_open_files(-1);
+    let  db_options = BlockstoreOptions::default();
+   
 
     // Open the database
-    let blockstore = Blockstore::open_with_options(db_path, db_options, true, None).unwrap();
+    let blockstore = Blockstore::open_with_options(db_path, db_options).unwrap();
 
     // Return both Blockstore and TempDir
     (blockstore, temp_dir)
